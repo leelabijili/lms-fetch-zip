@@ -2,4 +2,4 @@
 
 A new project connected to GitHub.
 
-LB
+Leela Bijili
