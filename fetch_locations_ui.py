@@ -19,12 +19,16 @@ except Exception:
     pass
 
 # Import fetch module (load_dotenv runs on import)
-from fetch_locations import (
-    ALL_PROVIDER_SLUGS,
-    US_PROVIDER_SLUGS,
-    fetch_all_locations,
-    _get_download_path,
-)
+try:
+    from fetch_locations import (
+        ALL_PROVIDER_SLUGS,
+        US_PROVIDER_SLUGS,
+        fetch_all_locations,
+        _get_download_path,
+    )
+except Exception as e:
+    st.error(f"Failed to import fetch_locations: {e}")
+    st.stop()
 
 st.set_page_config(page_title="Service Interruptions by Location", page_icon="📍", layout="centered")
 st.title("📍 Service Interruptions by Location")
