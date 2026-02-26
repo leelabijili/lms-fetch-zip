@@ -1,34 +1,20 @@
 #!/usr/bin/env python3
 """
 Streamlit UI for running fetch_locations: choose days, providers, geocoding, and indicator options.
-Supports Streamlit Community Cloud via secrets (DOWNDETECTOR_BEARER_TOKEN).
 """
 
 import io
-import os
 from contextlib import redirect_stdout
 
 import streamlit as st
 
-# Inject Streamlit secrets for Cloud deployment (use .env locally)
-try:
-    token = st.secrets.get("DOWNDETECTOR_BEARER_TOKEN", "")
-    if token:
-        os.environ["DOWNDETECTOR_BEARER_TOKEN"] = token
-except Exception:
-    pass
-
 # Import fetch module (load_dotenv runs on import)
-try:
-    from fetch_locations import (
-        ALL_PROVIDER_SLUGS,
-        US_PROVIDER_SLUGS,
-        fetch_all_locations,
-        _get_download_path,
-    )
-except Exception as e:
-    st.error(f"Failed to import fetch_locations: {e}")
-    st.stop()
+from fetch_locations import (
+    ALL_PROVIDER_SLUGS,
+    US_PROVIDER_SLUGS,
+    fetch_all_locations,
+    _get_download_path,
+)
 
 st.set_page_config(page_title="Service Interruptions by Location", page_icon="📍", layout="centered")
 st.title("📍 Service Interruptions by Location")
@@ -49,13 +35,9 @@ with col1:
     )
 
 with col2:
-    try:
-        default_output = _get_download_path()
-    except Exception:
-        default_output = "us_providers_locations.csv"
     output_path = st.text_input(
         "Output path",
-        value=default_output,
+        value=_get_download_path(),
         help="Edit to change where the CSV is saved.",
     )
 
@@ -121,12 +103,3 @@ if run_clicked:
         log = out.getvalue()
         st.success("Done!")
         st.code(log, language="text")
-        if os.path.isfile(resolved_output):
-            with open(resolved_output, "rb") as f:
-                st.download_button(
-                    "Download CSV",
-                    data=f.read(),
-                    file_name=os.path.basename(resolved_output),
-                    mime="text/csv",
-                    type="primary",
-                )
