@@ -10,14 +10,13 @@ from contextlib import redirect_stdout
 
 import streamlit as st
 
-# Inject Streamlit secrets into env for fetch_locations (required for Streamlit Cloud)
-# Locally, no secrets.toml → use .env. On Cloud, secrets.toml provides the token.
+# Inject Streamlit secrets for Cloud deployment (use .env locally)
 try:
     token = st.secrets.get("DOWNDETECTOR_BEARER_TOKEN", "")
     if token:
         os.environ["DOWNDETECTOR_BEARER_TOKEN"] = token
 except Exception:
-    pass  # No secrets file locally; fetch_locations uses .env via load_dotenv
+    pass
 
 # Import fetch module (load_dotenv runs on import)
 from fetch_locations import (
@@ -46,10 +45,14 @@ with col1:
     )
 
 with col2:
+    try:
+        default_output = _get_download_path()
+    except Exception:
+        default_output = "us_providers_locations.csv"
     output_path = st.text_input(
         "Output path",
-        value=_get_download_path(),
-        help="Edit to change where the CSV is saved. Default: Downloads folder.",
+        value=default_output,
+        help="Edit to change where the CSV is saved.",
     )
 
 # Providers
@@ -114,7 +117,6 @@ if run_clicked:
         log = out.getvalue()
         st.success("Done!")
         st.code(log, language="text")
-        # Offer download (useful when deployed on Streamlit Cloud)
         if os.path.isfile(resolved_output):
             with open(resolved_output, "rb") as f:
                 st.download_button(
