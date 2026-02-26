@@ -88,12 +88,12 @@ use_zcta = True
 if geocode:
     use_zcta = st.radio(
         "Geocoding method",
-        options=["ZCTA (fast)", "Nominatim (slow)"],
+        options=["ZIP centroid (fast)", "Nominatim (slow)"],
         index=0,
         horizontal=True,
-        help="ZCTA: Census shapefile + ZIP lookup. Nominatim: ~1 req/sec per unique coordinate.",
+        help="ZIP centroid: nearest ZIP match via lat/lon (~5MB download). Nominatim: ~1 req/sec per unique coordinate.",
     )
-    use_zcta = use_zcta.startswith("ZCTA")
+    use_zcta = use_zcta.startswith("ZIP")
 
 # --- Run ---
 st.divider()

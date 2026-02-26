@@ -13,6 +13,7 @@ import sys
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 import requests
 from dotenv import load_dotenv
@@ -21,9 +22,7 @@ from geopy.extra.rate_limiter import RateLimiter
 
 load_dotenv()
 
-# US Census ZCTA shapefile (ZIP Code Tabulation Areas)
-ZCTA_URL = "https://www2.census.gov/geo/tiger/TIGER2024/ZCTA520/tl_2024_us_zcta520.zip"
-# ZIP→city/state lookup (free CSV from GitHub)
+# ZIP centroid CSV with lat/lng, city, state (~5MB, used for fast geocoding)
 ZIP_LOOKUP_URL = "https://raw.githubusercontent.com/akinniyi/US-Zip-Codes-With-City-State/master/uszips.csv"
 ZCTA_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "lms-fetch-zip")
 
@@ -113,75 +112,61 @@ def _extract_address_components(raw: dict) -> Dict[str, str]:
     return {"zip": zip_code, "city": city, "state": state}
 
 
-def _get_zcta_shapefile_path() -> str:
-    """Download ZCTA shapefile if needed. Returns path to the .zip file."""
-    os.makedirs(ZCTA_CACHE_DIR, exist_ok=True)
-    zip_path = os.path.join(ZCTA_CACHE_DIR, "tl_2024_us_zcta520.zip")
-    if os.path.exists(zip_path):
-        return zip_path
-    print("Downloading ZCTA shapefile from Census (~150MB, one-time)...")
-    resp = requests.get(ZCTA_URL, stream=True, timeout=60)
-    resp.raise_for_status()
-    with open(zip_path, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=8192):
-            f.write(chunk)
-    print(f"Saved to {zip_path}")
-    return zip_path
+def _geocode_rows_centroid(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Assign ZIP, city, state by finding the nearest ZIP centroid (haversine).
 
+    Uses the lightweight uszips.csv (~5MB) instead of the 150MB Census shapefile.
+    No geopandas/GDAL required — only numpy (bundled with pandas).
+    """
+    csv_path = _get_zip_lookup_path()
+    df = pd.read_csv(csv_path)
 
-def _geocode_rows_zcta(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Assign ZIP from ZCTA shapefile (point-in-polygon). Fast, zip only; city/state empty."""
-    import geopandas as gpd
-    from shapely.geometry import Point
+    lat_col = "lat" if "lat" in df.columns else df.columns[0]
+    lng_col = "lng" if "lng" in df.columns else df.columns[1]
+    zip_col = "zip" if "zip" in df.columns else df.columns[2]
+    city_col = "city" if "city" in df.columns else None
+    state_col = "state_id" if "state_id" in df.columns else ("state_name" if "state_name" in df.columns else "state")
 
-    zip_path = _get_zcta_shapefile_path()
-    print("Loading ZCTA boundaries...")
-    zcta = gpd.read_file(f"zip://{zip_path}")
-    zcta = zcta.to_crs("EPSG:4326")
-    col = None
-    for c in ("ZCTA520", "ZCTACE20", "ZCTA5CE20"):
-        if c in zcta.columns:
-            col = c
-            break
-    if col is None:
-        candidates = [c for c in zcta.columns if "ZCTA" in c.upper() or "ZIP" in c.upper()]
-        col = candidates[0] if candidates else zcta.columns[0]
+    zip_lats = df[lat_col].values.astype(float)
+    zip_lons = df[lng_col].values.astype(float)
+    zip_codes = df[zip_col].astype(str).values
+    zip_cities = df[city_col].astype(str).values if city_col else np.full(len(df), "")
+    zip_states = df[state_col].astype(str).values
 
-    points_data = []
-    for i, r in enumerate(rows):
+    zip_lats_rad = np.radians(zip_lats)
+    zip_lons_rad = np.radians(zip_lons)
+    cos_zip_lats = np.cos(zip_lats_rad)
+
+    cache: Dict[Tuple[float, float], Dict[str, str]] = {}
+
+    for r in rows:
         lat, lon = r.get("latitude"), r.get("longitude")
         try:
             lat_f, lon_f = float(lat), float(lon)
             if pd.isna(lat_f) or pd.isna(lon_f):
-                continue
+                raise ValueError
         except (TypeError, ValueError):
+            r["zip"] = r["city"] = r["state"] = ""
             continue
-        points_data.append((i, Point(lon_f, lat_f)))
 
-    if not points_data:
-        for r in rows:
-            r["zip"] = ""
-            r["city"] = ""
-            r["state"] = ""
-        return rows
+        key = (round(lat_f, 4), round(lon_f, 4))
+        if key not in cache:
+            lat_rad = np.radians(lat_f)
+            lon_rad = np.radians(lon_f)
+            dlat = zip_lats_rad - lat_rad
+            dlon = zip_lons_rad - lon_rad
+            a = np.sin(dlat / 2) ** 2 + np.cos(lat_rad) * cos_zip_lats * np.sin(dlon / 2) ** 2
+            dist = np.arcsin(np.sqrt(np.minimum(a, 1.0)))
+            idx = int(np.argmin(dist))
+            cache[key] = {"zip": zip_codes[idx], "city": zip_cities[idx], "state": zip_states[idx]}
 
-    indices, geometries = zip(*points_data)
-    pts_gdf = gpd.GeoDataFrame({"idx": indices}, geometry=list(geometries), crs="EPSG:4326")
-    joined = gpd.sjoin(pts_gdf, zcta[["geometry", col]], how="left", predicate="within")
-    idx_to_zip = joined.drop_duplicates("idx").set_index("idx")[col].to_dict()
+        match = cache[key]
+        r["zip"] = match["zip"]
+        r["city"] = match["city"]
+        r["state"] = match["state"]
 
-    for i, r in enumerate(rows):
-        val = idx_to_zip.get(i)
-        if val is not None and pd.notna(val):
-            try:
-                r["zip"] = str(int(float(val)))
-            except (TypeError, ValueError):
-                r["zip"] = str(val).strip()
-        else:
-            r["zip"] = ""
-        r["city"] = ""
-        r["state"] = ""
-
+    unique_zips = len({r["zip"] for r in rows if r.get("zip")})
+    print(f"  Matched {len(cache)} unique coordinates to {unique_zips} unique ZIPs")
     return rows
 
 
@@ -466,10 +451,8 @@ def fetch_all_locations(
 
     if geocode:
         if use_zcta:
-            print("\nAdding ZIP via ZCTA shapefile (fast)...")
-            all_rows = _geocode_rows_zcta(all_rows)
-            print("Filling city/state from ZIP lookup...")
-            all_rows = _lookup_city_state_from_zip(all_rows)
+            print("\nAdding ZIP, city, state via centroid matching (fast)...")
+            all_rows = _geocode_rows_centroid(all_rows)
         else:
             print("\nAdding zip, city, state via Nominatim (slow, ~1 req/sec)...")
             all_rows, interrupted = _geocode_rows(all_rows)
