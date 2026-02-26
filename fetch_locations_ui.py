@@ -1,22 +1,38 @@
 #!/usr/bin/env python3
 """
 Streamlit UI for running fetch_locations: choose days, providers, geocoding, and indicator options.
+Works locally (uses .env) and on Streamlit Community Cloud (uses secrets).
 """
 
 import io
+import os
 from contextlib import redirect_stdout
 
 import streamlit as st
 
-# Import fetch module (load_dotenv runs on import)
-from fetch_locations import (
-    ALL_PROVIDER_SLUGS,
-    US_PROVIDER_SLUGS,
-    fetch_all_locations,
-    _get_download_path,
-)
-
+# st.set_page_config MUST be the first Streamlit command
 st.set_page_config(page_title="Service Interruptions by Location", page_icon="📍", layout="centered")
+
+# Inject Streamlit Cloud secrets into env (locally, .env is used via load_dotenv)
+try:
+    token = st.secrets.get("DOWNDETECTOR_BEARER_TOKEN", "")
+    if token:
+        os.environ["DOWNDETECTOR_BEARER_TOKEN"] = token
+except Exception:
+    pass
+
+# Import fetch module (load_dotenv runs on import)
+try:
+    from fetch_locations import (
+        ALL_PROVIDER_SLUGS,
+        US_PROVIDER_SLUGS,
+        fetch_all_locations,
+        _get_download_path,
+    )
+except Exception as e:
+    st.error(f"Failed to load: {e}")
+    st.stop()
+
 st.title("📍 Service Interruptions by Location")
 st.caption("Fetch location data for US telecom/internet providers, geocode to ZIP/city/state, and resolve affected service names.")
 
@@ -29,15 +45,19 @@ with col1:
     days = st.number_input(
         "Last N days to fetch",
         min_value=1,
-        max_value=90,
+        max_value=7,
         value=7,
         help="Last N days of data (API limit: 7 days for locations).",
     )
 
 with col2:
+    try:
+        default_output = _get_download_path()
+    except Exception:
+        default_output = "/tmp/us_providers_locations.csv"
     output_path = st.text_input(
         "Output path",
-        value=_get_download_path(),
+        value=default_output,
         help="Edit to change where the CSV is saved.",
     )
 
@@ -84,7 +104,7 @@ if run_clicked:
         st.error("Select at least one provider.")
     else:
         slugs = providers_selection
-        resolved_output = output_path.strip() or _get_download_path()
+        resolved_output = output_path.strip() or default_output
         with st.spinner("Running fetch... This may take several minutes."):
             out = io.StringIO()
             try:
@@ -103,3 +123,12 @@ if run_clicked:
         log = out.getvalue()
         st.success("Done!")
         st.code(log, language="text")
+        if os.path.isfile(resolved_output):
+            with open(resolved_output, "rb") as f:
+                st.download_button(
+                    "Download CSV",
+                    data=f.read(),
+                    file_name=os.path.basename(resolved_output),
+                    mime="text/csv",
+                    type="primary",
+                )
