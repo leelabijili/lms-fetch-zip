@@ -1,58 +1,24 @@
-# Deploy to Streamlit Community Cloud
+# Share Your Streamlit App via URL
 
-This guide walks you through deploying the **Service Interruptions by Location** UI to [Streamlit Community Cloud](https://share.streamlit.io) so you can share it via a URL.
+## Option A: Streamlit Community Cloud (requires GitHub)
 
-## Prerequisites
-
-- A [GitHub](https://github.com) account
-- A [Streamlit Cloud](https://share.streamlit.io) account (free, sign in with GitHub)
-- Your Downdetector API bearer token
-
-## Step 1: Push Your Project to GitHub
-
-1. Create a new repository on GitHub (e.g. `lms-fetch-zip`).
-2. From your project folder, run:
-
+1. Push your repo to GitHub (Streamlit Cloud does not support Bitbucket):
    ```bash
-   git init
-   git add .
-   git commit -m "Initial commit"
-   git branch -M main
-   git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO.git
-   git push -u origin main
+   git remote add github https://github.com/YOUR_USERNAME/lms-fetch-zip.git
+   git push -u github main
    ```
 
-3. Make sure `.env` is in `.gitignore` (it already is) so your token is **not** committed.
+2. Go to [share.streamlit.io](https://share.streamlit.io) → **New app**
 
-## Step 2: Deploy on Streamlit Cloud
+3. Choose repo `YOUR_USERNAME/lms-fetch-zip`, branch `main`, file `fetch_locations_ui.py`
 
-1. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub.
-2. Click **New app**.
-3. Choose your repository, branch (e.g. `main`), and set:
-   - **Main file path:** `fetch_locations_ui.py`
-4. Expand **Advanced settings**.
-5. Add your secret in **Secrets**:
-
+4. In **Advanced settings** → **Secrets**, add:
    ```toml
-   DOWNDETECTOR_BEARER_TOKEN = "your-bearer-token-here"
+   DOWNDETECTOR_BEARER_TOKEN = "your-token-here"
    ```
 
-6. Click **Deploy**.
+5. Click **Deploy** and share the URL: `https://YOUR_APP_NAME.streamlit.app`
 
-## Step 3: Wait for Deployment
+## Option B: Render or Railway (works with Bitbucket)
 
-The first run may take several minutes (geopandas, Census ZCTA download, etc.). You can monitor logs in the Streamlit Cloud dashboard.
-
-## After Deployment
-
-- Your app will be available at `https://YOUR_APP_NAME.streamlit.app`.
-- Use the **Download CSV** button to save the output file when running on Cloud.
-- Anyone with the URL can use the app and your Downdetector token. Share only with trusted users, or consider hosting privately.
-
-## Troubleshooting
-
-| Issue | Fix |
-|-------|-----|
-| "DOWNDETECTOR_BEARER_TOKEN not set" | Add the token in Streamlit Cloud **Secrets**. |
-| App crashes on startup | Check the Cloud logs for Python/import errors. |
-| Slow first run | Normal. Census ZCTA (~150MB) and ZIP CSV (~5MB) are downloaded once and cached. |
+Connect your Bitbucket repo and deploy. Set build/start commands and add `DOWNDETECTOR_BEARER_TOKEN` as an environment variable.
