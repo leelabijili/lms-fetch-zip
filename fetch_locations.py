@@ -360,6 +360,7 @@ def fetch_locations_for_slug(
     end_str: str,
     country_id: int,
     page_size: int = 1000,
+    debug: bool = False,
 ) -> List[Dict[str, Any]]:
     """Fetch locations for one slug with pagination. Returns flattened records."""
     url = f"{BASE_URL}/slugs/{slug}/locations"
@@ -377,10 +378,18 @@ def fetch_locations_for_slug(
             if page_token:
                 params["page"] = page_token
             resp = requests.get(url, params=params, headers=get_headers(), timeout=30)
+            if debug:
+                req_url = f"{url}?startdate={start_str}&enddate={end_str}&countries={country_id}"
+                print(f"  [debug] {slug}: GET {req_url}")
+                print(f"  [debug] {slug}: status={resp.status_code}")
             if resp.status_code != 200:
+                if debug:
+                    print(f"  [debug] {slug}: response body (first 200 chars): {resp.text[:200]!r}")
                 break
             data = resp.json()
             records = data if isinstance(data, list) else (data.get("data", []) or [])
+            if debug:
+                print(f"  [debug] {slug}: records_in_page={len(records)}")
             for r in records:
                 if isinstance(r, dict):
                     all_records.append(_flatten_location_record(r, slug))
@@ -388,7 +397,9 @@ def fetch_locations_for_slug(
             if not next_token:
                 break
             page_token = next_token
-    except Exception:
+    except Exception as e:
+        if debug:
+            print(f"  [debug] {slug}: exception={e!r}")
         pass
 
     return all_records
@@ -408,10 +419,16 @@ def fetch_all_locations(
     use_zcta: bool = True,
     include_no_indicator: bool = False,
     days: int = 7,
+    debug: bool = False,
 ) -> None:
     """Fetch locations for all US providers and save to CSV. Add zip via ZCTA (fast) then city/state via CSV lookup; or use Nominatim for full geocoding (slow)."""
     slugs = slugs or US_PROVIDER_SLUGS
     output_path = output if output is not None else _get_download_path()
+
+    if debug:
+        token = os.getenv("DOWNDETECTOR_BEARER_TOKEN")
+        print(f"  [debug] Token present: {'yes' if token else 'no'}")
+        print(f"  [debug] datetime.utcnow(): {datetime.utcnow()}")
 
     start_str, end_str = _get_date_range(days)
     country_id = get_us_country_id()
@@ -424,7 +441,7 @@ def fetch_all_locations(
 
     all_rows: List[Dict[str, Any]] = []
     for slug in slugs:
-        records = fetch_locations_for_slug(slug, start_str, end_str, country_id)
+        records = fetch_locations_for_slug(slug, start_str, end_str, country_id, debug=debug)
         if records:
             all_rows.extend(records)
             print(f"  {slug}: {len(records)} location(s)")
@@ -487,5 +504,6 @@ if __name__ == "__main__":
     parser.add_argument("--nominatim", action="store_true", help="Use Nominatim instead of ZCTA (slow, adds city/state)")
     parser.add_argument("--include-no-indicator", action="store_true", help="Include rows with empty indicator_id (default: exclude them)")
     parser.add_argument("--days", type=int, default=7, help="Number of days to fetch (default: 7)")
+    parser.add_argument("--debug", action="store_true", help="Print debug info (token presence, request URL, status, record count)")
     args = parser.parse_args()
-    fetch_all_locations(output=args.output, geocode=not args.no_geocode, use_zcta=not args.nominatim, include_no_indicator=args.include_no_indicator, days=args.days)
+    fetch_all_locations(output=args.output, geocode=not args.no_geocode, use_zcta=not args.nominatim, include_no_indicator=args.include_no_indicator, days=args.days, debug=args.debug)

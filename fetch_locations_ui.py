@@ -14,8 +14,21 @@ import streamlit as st
 st.set_page_config(page_title="Service Interruptions by Location", page_icon="📍", layout="centered")
 
 # Inject Streamlit Cloud secrets into env (locally, .env is used via load_dotenv)
+# Try multiple key formats in case secrets.toml uses nested or alternate names
+def _get_token_from_secrets():
+    try:
+        s = st.secrets
+        token = s.get("DOWNDETECTOR_BEARER_TOKEN", "") or ""
+        if not token and isinstance(s.get("downdetector"), dict):
+            token = s.get("downdetector", {}).get("bearer_token", "") or ""
+        if not token and "DOWNDETECTOR_BEARER_TOKEN" in s:
+            token = s["DOWNDETECTOR_BEARER_TOKEN"] or ""
+        return (token or "").strip()
+    except Exception:
+        return ""
+
 try:
-    token = st.secrets.get("DOWNDETECTOR_BEARER_TOKEN", "")
+    token = _get_token_from_secrets()
     if token:
         os.environ["DOWNDETECTOR_BEARER_TOKEN"] = token
 except Exception:
@@ -84,6 +97,14 @@ include_no_indicator = st.checkbox(
 # Geocoding
 st.markdown("**Geocoding**")
 geocode = st.checkbox("Add ZIP, city, and state", value=True, help="Geocode lat/lon to address.")
+
+# Debug (Cloud)
+with st.expander("Debug (Cloud)", expanded=False):
+    debug = st.checkbox(
+        "Enable verbose debug output",
+        value=False,
+        help="Log token presence, request URL, status code, and record count. Use when debugging \"no data\" on Streamlit Cloud.",
+    )
 use_zcta = True
 if geocode:
     use_zcta = st.radio(
@@ -116,6 +137,7 @@ if run_clicked:
                         use_zcta=use_zcta,
                         include_no_indicator=include_no_indicator,
                         days=days,
+                        debug=debug,
                     )
             except Exception as e:
                 st.exception(e)
